@@ -42,12 +42,13 @@ router.post('/', upload.fields([{ name: 'photo' }, { name: 'kyc' }]), async (req
 });
 
 
-// GET: Search and Sort Helpers
+// GET: Search, Sort, Count helpers
 router.get('/', async (req, res) => {
   try {
     const { search = '', sortBy = 'fullName', order = 'asc' } = req.query;
+    const sortDirection = order === 'asc' ? 1 : -1;
 
-    const query = {
+    const matchStage = {
       $or: [
         { fullName: { $regex: search, $options: 'i' } },
         { phone: { $regex: search, $options: 'i' } },
@@ -55,15 +56,37 @@ router.get('/', async (req, res) => {
       ]
     };
 
-    const sortDirection = order === 'asc' ? 1 : -1;
-    const helpers = await Helper.find(query).sort({ [sortBy]: sortDirection });
+    const result = await Helper.aggregate([
+      { $match: matchStage },
+      {
+        $facet: {
+          data: [
+            { $sort: { [sortBy]: sortDirection } },
+            // Optional: Add pagination here with $skip and $limit
+          ],
+          count: [
+            { $count: 'filteredCount' }
+          ]
+        }
+      }
+    ]);
 
-    res.json(helpers);
+    const filteredResults = result[0].data;
+    const filteredCount = result[0].count[0]?.filteredCount || 0;
+
+    const totalCount = await Helper.countDocuments();
+
+    res.json({
+      results: filteredResults,
+      filteredCount,
+      totalCount
+    });
   } catch (err) {
     console.error(err);
-    res.status(500).json({ error: 'Failed to fetch helpers' });
+    res.status(500).json({ error: 'Aggregation failed' });
   }
 });
+
 
 
 // GET: Single helper by ID
